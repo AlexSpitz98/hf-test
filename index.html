@@ -85,7 +85,6 @@
       <div class="bar"><div id="nextBar" style="width:0%"></div></div>
       <div class="muted" id="nextLeft"></div>
     </div>
-    <div class="note" id="fromNote" hidden></div>
     <h2>Diese Woche</h2>
     <div class="stats" id="weekStats"></div>
     <h2>Gesamt</h2>
@@ -117,17 +116,6 @@
   <section id="v-data" hidden>
     <h2>Daten</h2>
     <div class="card">
-      <b>Zählen ab</b>
-      <div class="muted">Fahrten vor diesem Datum (z. B. deine Tests) werden ignoriert. Die Notiz bleibt unverändert.</div>
-      <label for="fromDate" class="muted">Datum</label>
-      <input type="date" id="fromDate" style="width:100%;border:2px solid #C9D2CC;border-radius:12px;padding:10px;font:15px inherit;background:#fff;color:var(--ink);min-height:46px">
-      <div class="row">
-        <button class="btn prim" id="fromSave" type="button">Übernehmen</button>
-        <button class="btn sec" id="fromToday" type="button">Ab heute</button>
-        <button class="btn sec" id="fromClear" type="button">Alle zählen</button>
-      </div>
-    </div>
-    <div class="card">
       <div class="muted" id="dataInfo"></div>
       <label for="logText" class="muted" style="font-weight:600">Notiztext (zum Prüfen oder manuell einfügen)</label>
       <textarea id="logText" placeholder="Start 22.11.2026, 07:42&#10;Ende 22.11.2026, 08:05"></textarea>
@@ -139,7 +127,7 @@
       <div id="wipeConfirm" class="warn" hidden>Wirklich alle gespeicherten Fahrten und Belohnungen in dieser App löschen? Deine Notiz bleibt erhalten.
         <div class="row" style="margin-top:8px"><button class="btn prim" id="wipeYes" type="button">Ja, löschen</button><button class="btn sec" id="wipeNo" type="button">Abbrechen</button></div></div>
     </div>
-    <div class="note">Datenschutz: Deine Fahrten kommen aus der Notiz „Handyfrei-Fahrten“ und werden nur hinter dem # der Adresse übergeben. Dieser Teil wird nie an einen Server geschickt. Gespeichert wird nur in diesem Browser auf deinem iPhone. Punkte: 1 pro handyfreier Fahrminute. Fahrten unter 2 Minuten und über 12 Stunden werden nicht gewertet.</div>
+    <div class="note">Datenschutz: Deine Fahrten kommen aus der Notiz „Handyfrei-Fahrten“ und werden nur hinter dem # der Adresse übergeben. Dieser Teil wird nie an einen Server geschickt. Gespeichert wird nur in diesem Browser auf deinem iPhone. Punkte: 1 pro handyfreier Fahrminute.</div>
   </section>
 </main>
 
@@ -158,7 +146,9 @@
   // ---------- Parser ----------
   var MON={januar:1,februar:2,'märz':3,maerz:3,april:4,mai:5,juni:6,juli:7,august:8,september:9,oktober:10,november:11,dezember:12,jan:1,feb:2,'mär':3,mrz:3,apr:4,jun:6,jul:7,aug:8,sep:9,sept:9,okt:10,nov:11,dez:12};
   function parseDate(t){
-    var m=t.match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})\D{0,8}?(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    var iso=t.match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?/);
+    if(iso) return new Date(+iso[1],+iso[2]-1,+iso[3],+iso[4],+iso[5],+(iso[6]||0));
+    var m=t.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})\D{0,8}?(\d{1,2}):(\d{2})(?::(\d{2}))?/);
     if(m){ var y=+m[3]; if(y<100) y+=2000; return new Date(y,+m[2]-1,+m[1],+m[4],+m[5],+(m[6]||0)); }
     m=t.match(/(\d{1,2})\.?\s*([A-Za-zÄÖÜäöü]+)\.?\s+(\d{4})\D{0,8}?(\d{1,2}):(\d{2})(?::(\d{2}))?/);
     if(m && MON[m[2].toLowerCase()]) return new Date(+m[3],MON[m[2].toLowerCase()]-1,+m[1],+m[4],+m[5],+(m[6]||0));
@@ -170,31 +160,28 @@
   function fDay(d){return ['So','Mo','Di','Mi','Do','Fr','Sa'][d.getDay()]+' '+two(d.getDate())+'.'+two(d.getMonth()+1)+'.';}
   function fTime(d){return two(d.getHours())+':'+two(d.getMinutes());}
   function fDur(min){return min>=60?Math.floor(min/60)+' h '+two(min%60)+' min':min+' min';}
-  var MIN_TRIP=2;
-  function analyse(text,from){
-    var ev=[],bad=0,skipped=0;
-    String(text||'').split(/\r?\n/).forEach(function(line){
+  function analyse(text){
+    var ev=[],bad=0;
+    String(text||'').split(/\r?\n|\||;/).forEach(function(line){
       var m=line.match(/^\W*(start|ende)(.*)$/i); if(!m) return;
       var d=parseDate(m[2]); if(!d){bad++;return;}
-      if(from && d<from){ skipped++; return; }
       ev.push({type:m[1].toLowerCase(),d:d});
     });
     ev.sort(function(a,b){return a.d-b.d;});
-    var trips=[],issues=[],open=null,shortCount=0;
+    var trips=[],issues=[],open=null,lastClean=true;
     ev.forEach(function(e){
       if(e.type==='start'){
         if(open) issues.push('Doppeltes „Start“ am '+fDay(e.d)+' um '+fTime(e.d)+' – gezählt wird ab '+fTime(open)+'.');
         else open=e.d;
       } else {
         if(!open){ issues.push('„Ende“ ohne „Start“ am '+fDay(e.d)+' um '+fTime(e.d)+'.'); return; }
-        var min=Math.round((e.d-open)/60000), why='';
-        if(min>720){ issues.push('Sehr lange Fahrt am '+fDay(open)+' ('+fDur(min)+') – Fahrmodus vergessen? Nicht gewertet.'); why='zu lang – nicht gewertet'; }
-        else if(min<MIN_TRIP){ why='zu kurz – nicht gewertet'; shortCount++; }
-        trips.push({s:open,e:e.d,min:min,valid:!why,why:why}); open=null;
+        var min=Math.round((e.d-open)/60000), flag=false;
+        if(min>720){ issues.push('Sehr lange Fahrt am '+fDay(open)+' ('+fDur(min)+') – Fahrmodus vergessen? Nicht gewertet.'); flag=true; }
+        trips.push({s:open,e:e.d,min:min,valid:!flag}); open=null;
       }
     });
     if(bad) issues.push(bad+' Zeile(n) ohne lesbares Datum.');
-    return {trips:trips,issues:issues,open:open,events:ev.length,shortCount:shortCount,skipped:skipped};
+    return {trips:trips,issues:issues,open:open,events:ev.length};
   }
 
   // ---------- Belohnungen ----------
@@ -209,36 +196,33 @@
     try{ raw=decodeURIComponent(raw.replace(/\+/g,'%20')); }catch(e){}
     return raw;
   }
-  var fromHash=readHash();
-  if(fromHash!==null){
+  function takeHash(){
+    var fromHash=readHash();
+    if(fromHash===null) return false;
     store('hf_log',fromHash); store('hf_updated',new Date().toISOString());
     try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+    return true;
   }
+  takeHash();
 
   function el(tag,cls,txt){var e=document.createElement(tag); if(cls) e.className=cls; if(txt!=null) e.textContent=txt; return e;}
   function statsBox(target,items){ var t=$(target); t.innerHTML=''; items.forEach(function(x){ var b=el('div','stat'); b.appendChild(el('b',null,String(x[0]))); b.appendChild(el('span',null,x[1])); t.appendChild(b); }); }
-  function tripRow(t){ var r=el('div','trip'); var l=el('div'); l.appendChild(el('div',null,fDay(t.s)+'  '+fTime(t.s)+' – '+fTime(t.e))); l.appendChild(el('small',null,t.valid?('+'+t.min+' Punkte'):t.why)); r.appendChild(l); r.appendChild(el('div','dur',fDur(t.min))); return r; }
+  function tripRow(t){ var r=el('div','trip'); var l=el('div'); l.appendChild(el('div',null,fDay(t.s)+'  '+fTime(t.s)+' – '+fTime(t.e))); l.appendChild(el('small',null,t.valid?('+'+t.min+' Punkte'):'nicht gewertet')); r.appendChild(l); r.appendChild(el('div','dur',fDur(t.min))); return r; }
 
   function render(){
     var text=store('hf_log')||'';
     $('#logText').value=text;
     var upd=store('hf_updated');
     $('#dataInfo').textContent= upd ? 'Zuletzt aktualisiert: '+fDay(new Date(upd))+' '+fTime(new Date(upd))+' Uhr (über den Kurzbefehl).' : 'Noch keine Daten. Öffne die App über deinen Kurzbefehl oder füge den Notiztext unten ein.';
-    var fromStr=store('hf_from'); var from=null; if(fromStr){ var fp=fromStr.split('-'); from=new Date(+fp[0],+fp[1]-1,+fp[2]); }
-    $('#fromDate').value=fromStr||'';
-    var r=analyse(text,from);
-    var fn=$('#fromNote'); var parts=[];
-    if(from) parts.push('Gezählt ab '+two(from.getDate())+'.'+two(from.getMonth()+1)+'.'+from.getFullYear()+(r.skipped?' ('+r.skipped+' ältere Einträge ignoriert)':''));
-    if(r.shortCount) parts.push(r.shortCount+' Fahrt(en) unter '+MIN_TRIP+' Minuten nicht gewertet');
-    fn.textContent=parts.join(' · '); fn.hidden=!parts.length;
+    var r=analyse(text);
     var valid=r.trips.filter(function(t){return t.valid;});
     var points=valid.reduce(function(a,t){return a+t.min;},0);
     // Serie: Fahrten am Ende ohne Auffälligkeit dazwischen -> vereinfachte Serie = gültige Fahrten in Folge seit letzter ungültiger
-    var streak=0; for(var i=r.trips.length-1;i>=0;i--){ var t=r.trips[i]; if(t.valid) streak++; else if(t.why.indexOf('kurz')<0) break; }
+    var streak=0; for(var i=r.trips.length-1;i>=0;i--){ if(r.trips[i].valid) streak++; else break; }
     if(r.issues.length && r.trips.length===0) streak=0;
     $('#heroPoints').textContent=points;
     $('#streakPill').textContent='Serie: '+streak;
-    $('#heroSub').textContent= valid.length ? (valid.length+(valid.length===1?' Fahrt · ':' Fahrten · ')+fDur(points)+' handyfrei') : 'Noch keine Fahrten – öffne die App über deinen Kurzbefehl.';
+    $('#heroSub').textContent= r.trips.length ? (r.trips.length+' Fahrten · '+fDur(points)+' handyfrei') : 'Noch keine Fahrten – öffne die App über deinen Kurzbefehl.';
     // Live
     var live=$('#liveBox');
     if(r.open){ live.hidden=false; live.innerHTML=''; live.appendChild(el('b',null,'Fahrt läuft')); live.appendChild(el('div',null,'seit '+fDay(r.open)+' '+fTime(r.open)+' Uhr – noch kein „Ende“ in der Notiz.')); }
@@ -295,13 +279,9 @@
   };
   $('#useText').onclick=function(){ store('hf_log',$('#logText').value); store('hf_updated',new Date().toISOString()); render(); show('home'); };
   $('#demo').onclick=function(){ $('#logText').value='Handyfrei-Fahrten\nStart 20.11.2026, 07:42\nEnde 20.11.2026, 08:05\nStart 21.11.2026, 11:30\nEnde 21.11.2026, 11:52\nStart 21.11.2026, 17:10\nEnde 21.11.2026, 17:34\nStart 22.11.2026, 09:15\nEnde 22.11.2026, 09:48'; };
-  function isoDay(d){ return d.getFullYear()+'-'+two(d.getMonth()+1)+'-'+two(d.getDate()); }
-  $('#fromSave').onclick=function(){ var v=$('#fromDate').value; store('hf_from', v||null); render(); show('home'); };
-  $('#fromToday').onclick=function(){ store('hf_from', isoDay(new Date())); render(); show('home'); };
-  $('#fromClear').onclick=function(){ store('hf_from', null); render(); };
   $('#wipe').onclick=function(){ $('#wipeConfirm').hidden=false; };
   $('#wipeNo').onclick=function(){ $('#wipeConfirm').hidden=true; };
-  $('#wipeYes').onclick=function(){ store('hf_log',null); store('hf_updated',null); store('hf_rewards',null); store('hf_from',null); $('#wipeConfirm').hidden=true; render(); };
+  $('#wipeYes').onclick=function(){ store('hf_log',null); store('hf_updated',null); store('hf_rewards',null); $('#wipeConfirm').hidden=true; render(); };
 
   function show(v){
     ['home','trips','rewards','data'].forEach(function(n){ $('#v-'+n).hidden=(n!==v); });
@@ -311,6 +291,7 @@
   [].forEach.call(document.querySelectorAll('nav button'),function(b){ b.onclick=function(){ show(b.dataset.v); }; });
 
   if('serviceWorker' in navigator){ try{ navigator.serviceWorker.register('sw.js').catch(function(){}); }catch(e){} }
+  window.addEventListener('hashchange',function(){ if(takeHash()){ render(); show('home'); } });
   render(); show('home');
 })();
 </script>
